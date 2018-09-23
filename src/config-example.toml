@@ -1,7 +1,9 @@
 [musicserver]
-# e-mail address used to log in to Google services
+# E-mail address used to log in to Google services
 username = "example@gmail.com"
-# password used to log in to Google services
+# Password used to log in to Google services
+# If using two-factor authentication, you need to create an app password at
+# https://myaccount.google.com/apppasswords
 password = ""
 # Google device ID, run once with a valid username and password for suggestions
 device-id = ""
