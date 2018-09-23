@@ -1,0 +1,7 @@
+[musicserver]
+# e-mail address used to log in to Google services
+username = "example@gmail.com"
+# password used to log in to Google services
+password = ""
+# Google device ID, run once with a valid username and password for suggestions
+device-id = ""

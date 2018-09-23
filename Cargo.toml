@@ -1,0 +1,17 @@
+[package]
+name = "musicserver"
+version = "0.1.0"
+authors = ["Gabriel de Perthuis <g2p.code@gmail.com>"]
+
+[dependencies]
+directories = "*"
+env_logger = "*"
+gpsoauth = { path = "../gpsoauth-rs" }
+hyper = "*"
+hyper-rustls = "*"
+rustls = "*"
+toml_edit = "*"
+webpki-roots = "*"
+
+[replace]
+#"ring:0.13.2" = { path = "../ring" }
