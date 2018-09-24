@@ -1,5 +1,6 @@
 extern crate directories;
 extern crate env_logger;
+extern crate futures;
 extern crate gpsoauth;
 extern crate hyper;
 extern crate hyper_rustls;
@@ -8,13 +9,14 @@ extern crate toml_edit;
 extern crate webpki_roots;
 
 use directories::ProjectDirs;
+use futures::future::{err, ok, Either};
+use hyper::client::HttpConnector;
 use hyper::rt::Future;
 use hyper::rt::Stream;
-use hyper::{Client, Server};
-use hyper::client::HttpConnector;
 use hyper::service::service_fn;
+use hyper::{Client, Server};
 use hyper_rustls::HttpsConnector;
-use std::io::{Read, Write, Seek, SeekFrom};
+use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 
 fn open_conf(dirs: &ProjectDirs) -> std::io::Result<std::fs::File> {
     std::fs::create_dir_all(dirs.config_dir()).unwrap();
@@ -56,12 +58,14 @@ fn main() {
     // https://seanmonstar.com/post/174480374517/hyper-v012
     let addr = ([0, 0, 0, 0], 3000).into();
 
-    // 4 is number of blocking DNS threads
+    // 4 is the number of blocking DNS threads
     let mut http = HttpConnector::new(4);
     http.enforce_http(false);
     let mut tls_config = rustls::ClientConfig::new();
     tls_config.key_log = std::sync::Arc::new(rustls::KeyLogFile::new());
-    tls_config.root_store.add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+    tls_config
+        .root_store
+        .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
     let https = HttpsConnector::from((http, tls_config));
     let client = Client::builder().build::<_, hyper::Body>(https);
 
@@ -70,30 +74,40 @@ fn main() {
             username, password, device_id,
         )).map_err(|e| eprintln!("Login error: {}", e));
 
-    let new_svc = move || {
-        let client = client.clone();
-        service_fn(move |req| {
-            println!("Proxying {}", req.uri().path());
-            client.get("http://google.fr/".parse().unwrap())
-        })
-    };
+    let main_future = login_req
+        .and_then(move |res| {
+            res.into_body()
+                .fold(None, |acc, chunk| {
+                    ok::<_, hyper::Error>(chunk.lines().fold(acc, |acc, line| {
+                        let line = line.unwrap();
+                        if line.starts_with("Token=") {
+                            Some(line[6..].to_owned())
+                        } else {
+                            acc
+                        }
+                    }))
+                }).map_err(|e| panic!("Error: {:?}", e))
+        }).and_then(move |token_opt| {
+            if let Some(token) = token_opt {
+                println!("Token is {}", token);
+                println!("Listening on {}", addr);
+                let proxy_svc = move || {
+                    let client = client.clone();
+                    service_fn(move |req| {
+                        println!("Proxying {}", req.uri().path());
+                        client.get("http://google.fr/".parse().unwrap())
+                    })
+                };
 
-    let server = Server::bind(&addr)
-        .serve(new_svc)
-        .map_err(|e| eprintln!("Server error: {}", e));
+                let server = Server::bind(&addr)
+                    .serve(proxy_svc)
+                    .map_err(|e| eprintln!("Server error: {}", e));
 
-    let main_future = login_req.and_then(move |res| {
-        res.into_body()
-            .for_each(|chunk| {
-                std::io::stdout()
-                    .write_all(&chunk)
-                    .map_err(|e| panic!("Error: {}", e))
-            }).map_err(|e| panic!("Error: {}", e))
-    }).and_then(move |()| {
-        println!();
-        println!("Listening on {}", addr);
-        server
-    });
+                Either::A(server)
+            } else {
+                Either::B(err(eprintln!("Failed to log in")))
+            }
+        });
 
     println!("Starting up");
     hyper::rt::run(main_future);
