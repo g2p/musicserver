@@ -23,6 +23,7 @@ fn open_conf(dirs: &ProjectDirs) -> std::io::Result<std::fs::File> {
     let mut conf_path = std::path::PathBuf::from(dirs.config_dir());
     conf_path.push("config.toml");
     match std::fs::OpenOptions::new()
+        .read(true)
         .write(true)
         .create_new(true)
         .open(&conf_path)
@@ -72,9 +73,10 @@ fn main() {
     let login_req = client
         .request(gpsoauth::master_login_request(
             username, password, device_id,
-        )).map_err(|e| eprintln!("Login error: {}", e));
+        ));
 
     let main_future = login_req
+        .map_err(|e| eprintln!("Login error: {}", e))
         .and_then(move |res| {
             res.into_body()
                 .fold(None, |acc, chunk| {
