@@ -21,7 +21,8 @@ use std::path::PathBuf;
 
 const CONF_FILENAME: &'static str = "config.toml";
 const CONF_ROOT: &'static str = "musicserver";
-const TOKEN_FILENAME: &'static str = "token";
+const MASTER_TOKEN_FILENAME: &'static str = "master.token";
+const OAUTH_TOKEN_FILENAME: &'static str = "oauth.token";
 
 fn open_conf(dirs: &ProjectDirs) -> std::io::Result<std::fs::File> {
     std::fs::create_dir_all(dirs.data_dir()).unwrap();
@@ -66,13 +67,12 @@ fn write_token(token_path: &PathBuf, token: &str) {
     std::fs::rename(&new_path, token_path).unwrap();
 }
 
-fn load_token_async(
+fn master_auth_async(
     client: &Client<HttpsConnector<HttpConnector>>,
-    conf: &toml::Value,
+    username: &str,
+    password: &str,
+    device_id: &str,
 ) -> impl Future<Item = String, Error = ()> {
-    let username = conf["username"].as_str().unwrap();
-    let password = conf["password"].as_str().unwrap();
-    let device_id = conf["device-id"].as_str().unwrap();
     client
         .request(gpsoauth::master_login_request(
             username, password, device_id,
@@ -82,6 +82,43 @@ fn load_token_async(
                     let line = line.unwrap();
                     if line.starts_with("Token=") {
                         Some(line[6..].to_owned())
+                    } else {
+                        acc
+                    }
+                }))
+            })
+        }).map_err(|e| eprintln!("Login error {}", e))
+        .then(|r| {
+            if let Ok(Some(x)) = r {
+                ok(x)
+            } else if let Err(y) = r {
+                err(y)
+            } else {
+                err(eprintln!("Login error (no token)"))
+            }
+        })
+}
+
+fn oauth_async(
+    client: &Client<HttpsConnector<HttpConnector>>,
+    username: &str,
+    master_token: &str,
+    device_id: &str,
+) -> impl Future<Item = String, Error = ()> {
+    client
+        .request(gpsoauth::oauth_request(
+            username,
+            master_token,
+            device_id,
+            "sj",
+            "com.google.android.music",
+            "38918a453d07199354f8b19af05ec6562ced5788",
+        )).and_then(move |res| {
+            res.into_body().fold(None, |acc, chunk| {
+                ok::<_, hyper::Error>(chunk.lines().fold(acc, |acc, line| {
+                    let line = line.unwrap();
+                    if line.starts_with("Auth=") {
+                        Some(line[5..].to_owned())
                     } else {
                         acc
                     }
@@ -111,8 +148,10 @@ fn main() {
         conf = &conf0[CONF_ROOT];
     }
 
-    let mut token_path = std::path::PathBuf::from(dirs.data_dir());
-    token_path.push(TOKEN_FILENAME);
+    let mut master_token_path = std::path::PathBuf::from(dirs.data_dir());
+    master_token_path.push(MASTER_TOKEN_FILENAME);
+    let mut oauth_token_path = std::path::PathBuf::from(dirs.data_dir());
+    oauth_token_path.push(OAUTH_TOKEN_FILENAME);
 
     // https://seanmonstar.com/post/174480374517/hyper-v012
     let addr = ([0, 0, 0, 0], 3000).into();
@@ -128,9 +167,31 @@ fn main() {
     let https = HttpsConnector::from((http, tls_config));
     let client = Client::builder().build::<_, hyper::Body>(https);
 
-    let main_future = load_token_async(&client, &conf).and_then(move |token| {
-        println!("Token is {}", token);
-        write_token(&token_path, &token);
+    let username = conf["username"].as_str().unwrap().to_owned();
+    let password = conf["password"].as_str().unwrap().to_owned();
+    let device_id = conf["device-id"].as_str().unwrap().to_owned();
+
+    // Clone the client so that the compiler trusts us not to
+    // reuse the same client across multiple closures
+    let client1 = client.clone();
+
+    let main_future = master_auth_async(
+        &client,
+        username.as_str(),
+        password.as_str(),
+        device_id.as_str(),
+    ).and_then(move |master_token| {
+        println!("Master token is {}", master_token);
+        write_token(&master_token_path, &master_token);
+        oauth_async(
+            &client1,
+            username.as_str(),
+            &master_token,
+            device_id.as_str(),
+        )
+    }).and_then(move |oauth_token| {
+        println!("OAuth token is {}", oauth_token);
+        write_token(&oauth_token_path, &oauth_token);
         println!("Listening on {}", addr);
         let proxy_svc = move || {
             let client = client.clone();
