@@ -18,9 +18,11 @@ use hyper::{Client, Server};
 use hyper_rustls::HttpsConnector;
 use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 
 const CONF_FILENAME: &'static str = "config.toml";
 const CONF_ROOT: &'static str = "musicserver";
+const TOKEN_FILENAME: &'static str = "token";
 
 fn open_conf(dirs: &ProjectDirs) -> std::io::Result<std::fs::File> {
     std::fs::create_dir_all(dirs.data_dir()).unwrap();
@@ -50,6 +52,21 @@ fn open_conf(dirs: &ProjectDirs) -> std::io::Result<std::fs::File> {
     }
 }
 
+fn write_token(token_path: &PathBuf, token: &str) {
+    let mut new_path = token_path.to_owned();
+    let mut new_fn = token_path.file_name().unwrap().to_owned();
+    new_fn.push(".new");
+    new_path.set_file_name(new_fn);
+    let mut new_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(&new_path)
+        .unwrap();
+    new_file.metadata().unwrap().permissions().set_mode(0o600);
+    new_file.write_all(token.as_bytes()).unwrap();
+    std::fs::rename(&new_path, token_path).unwrap();
+}
+
 fn main() {
     env_logger::init();
     let dirs = ProjectDirs::from("com.github", "G2P", "Music Server").unwrap();
@@ -68,6 +85,9 @@ fn main() {
         device_id = conf["device-id"].as_str().unwrap();
     }
 
+    let mut token_path = std::path::PathBuf::from(dirs.data_dir());
+    token_path.push(TOKEN_FILENAME);
+
     // https://seanmonstar.com/post/174480374517/hyper-v012
     let addr = ([0, 0, 0, 0], 3000).into();
 
@@ -82,10 +102,9 @@ fn main() {
     let https = HttpsConnector::from((http, tls_config));
     let client = Client::builder().build::<_, hyper::Body>(https);
 
-    let login_req = client
-        .request(gpsoauth::master_login_request(
-            username, password, device_id,
-        ));
+    let login_req = client.request(gpsoauth::master_login_request(
+        username, password, device_id,
+    ));
 
     let main_future = login_req
         .map_err(|e| eprintln!("Login error: {}", e))
@@ -104,6 +123,7 @@ fn main() {
         }).and_then(move |token_opt| {
             if let Some(token) = token_opt {
                 println!("Token is {}", token);
+                write_token(&token_path, &token);
                 println!("Listening on {}", addr);
                 let proxy_svc = move || {
                     let client = client.clone();
