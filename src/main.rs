@@ -9,8 +9,8 @@ extern crate toml;
 extern crate webpki_roots;
 
 use directories::ProjectDirs;
+use futures::future::{err, ok};
 use futures::prelude::*;
-use futures::future::{err, ok, Either};
 use hyper::client::HttpConnector;
 use hyper::service::service_fn;
 use hyper::{Client, Server};
@@ -69,7 +69,7 @@ fn write_token(token_path: &PathBuf, token: &str) {
 fn load_token_async(
     client: &Client<HttpsConnector<HttpConnector>>,
     conf: &toml::Value,
-) -> impl Future<Item = Option<String>, Error = ()> {
+) -> impl Future<Item = String, Error = ()> {
     let username = conf["username"].as_str().unwrap();
     let password = conf["password"].as_str().unwrap();
     let device_id = conf["device-id"].as_str().unwrap();
@@ -88,6 +88,15 @@ fn load_token_async(
                 }))
             })
         }).map_err(|e| eprintln!("Login error {}", e))
+        .then(|r| {
+            if let Ok(Some(x)) = r {
+                ok(x)
+            } else if let Err(y) = r {
+                err(y)
+            } else {
+                err(eprintln!("Login error (no token)"))
+            }
+        })
 }
 
 fn main() {
@@ -119,27 +128,23 @@ fn main() {
     let https = HttpsConnector::from((http, tls_config));
     let client = Client::builder().build::<_, hyper::Body>(https);
 
-    let main_future = load_token_async(&client, &conf).and_then(move |token_opt| {
-        if let Some(token) = token_opt {
-            println!("Token is {}", token);
-            write_token(&token_path, &token);
-            println!("Listening on {}", addr);
-            let proxy_svc = move || {
-                let client = client.clone();
-                service_fn(move |req| {
-                    println!("Proxying {}", req.uri().path());
-                    client.get("http://google.fr/".parse().unwrap())
-                })
-            };
+    let main_future = load_token_async(&client, &conf).and_then(move |token| {
+        println!("Token is {}", token);
+        write_token(&token_path, &token);
+        println!("Listening on {}", addr);
+        let proxy_svc = move || {
+            let client = client.clone();
+            service_fn(move |req| {
+                println!("Proxying {}", req.uri().path());
+                client.get("http://google.fr/".parse().unwrap())
+            })
+        };
 
-            let server = Server::bind(&addr)
-                .serve(proxy_svc)
-                .map_err(|e| eprintln!("Server error: {}", e));
+        let server = Server::bind(&addr)
+            .serve(proxy_svc)
+            .map_err(|e| eprintln!("Server error: {}", e));
 
-            Either::A(server)
-        } else {
-            Either::B(err(eprintln!("Failed to log in")))
-        }
+        server
     });
 
     println!("Starting up");
