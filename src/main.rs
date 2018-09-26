@@ -5,7 +5,7 @@ extern crate gpsoauth;
 extern crate hyper;
 extern crate hyper_rustls;
 extern crate rustls;
-extern crate toml_edit;
+extern crate toml;
 extern crate webpki_roots;
 
 use directories::ProjectDirs;
@@ -19,10 +19,14 @@ use hyper_rustls::HttpsConnector;
 use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::PermissionsExt;
 
+const CONF_FILENAME: &'static str = "config.toml";
+const CONF_ROOT: &'static str = "musicserver";
+
 fn open_conf(dirs: &ProjectDirs) -> std::io::Result<std::fs::File> {
+    std::fs::create_dir_all(dirs.data_dir()).unwrap();
     std::fs::create_dir_all(dirs.config_dir()).unwrap();
     let mut conf_path = std::path::PathBuf::from(dirs.config_dir());
-    conf_path.push("config.toml");
+    conf_path.push(CONF_FILENAME);
     match std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -49,14 +53,20 @@ fn open_conf(dirs: &ProjectDirs) -> std::io::Result<std::fs::File> {
 fn main() {
     env_logger::init();
     let dirs = ProjectDirs::from("com.github", "G2P", "Music Server").unwrap();
-    let mut conf = open_conf(&dirs).unwrap();
-    let mut conf_buf = String::new();
-    conf.read_to_string(&mut conf_buf).unwrap();
-    let conf = conf_buf.parse::<toml_edit::Document>().unwrap();
-    let conf = &conf["musicserver"];
-    let username = conf["username"].as_str().unwrap();
-    let password = conf["password"].as_str().unwrap();
-    let device_id = conf["device-id"].as_str().unwrap();
+    let (conf0, conf);
+    {
+        let mut conf_file = open_conf(&dirs).unwrap();
+        let mut conf_buf = String::new();
+        conf_file.read_to_string(&mut conf_buf).unwrap();
+        conf0 = conf_buf.parse::<toml::Value>().unwrap();
+        conf = &conf0[CONF_ROOT];
+    }
+    let (username, password, device_id);
+    {
+        username = conf["username"].as_str().unwrap();
+        password = conf["password"].as_str().unwrap();
+        device_id = conf["device-id"].as_str().unwrap();
+    }
 
     // https://seanmonstar.com/post/174480374517/hyper-v012
     let addr = ([0, 0, 0, 0], 3000).into();
