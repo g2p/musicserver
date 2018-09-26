@@ -17,6 +17,7 @@ use hyper::service::service_fn;
 use hyper::{Client, Server};
 use hyper_rustls::HttpsConnector;
 use std::io::{BufRead, Read, Seek, SeekFrom, Write};
+use std::os::unix::fs::PermissionsExt;
 
 fn open_conf(dirs: &ProjectDirs) -> std::io::Result<std::fs::File> {
     std::fs::create_dir_all(dirs.config_dir()).unwrap();
@@ -29,6 +30,7 @@ fn open_conf(dirs: &ProjectDirs) -> std::io::Result<std::fs::File> {
         .open(&conf_path)
     {
         Ok(mut conf) => {
+            conf.metadata().unwrap().permissions().set_mode(0o600);
             let conf_example = include_str!("config-example.toml");
             conf.write(conf_example.as_bytes()).unwrap();
             conf.seek(SeekFrom::Start(0)).unwrap();
