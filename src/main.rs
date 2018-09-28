@@ -143,8 +143,8 @@ fn main() {
                 .map_err(|e| eprintln!("API error (body chunks): {}", e))
                 .map(|body| (body, ctx))
         }).and_then(move |(body, ctx)| {
-            //println!("Devices: {:#?}", serde_json::from_slice::<serde_json::Value>(&body));
-            println!("{}", "Devices: ".to_owned() + std::str::from_utf8(&body).unwrap());
+            println!("{}", "Devices: ".to_owned() + &serde_json::to_string_pretty(&serde_json::from_slice::<serde_json::Value>(&body).unwrap()).unwrap());
+            //println!("{}", "Devices: ".to_owned() + std::str::from_utf8(&body).unwrap());
             println!("Listening on {}", addr);
             let proxy_svc = move || {
                 let client = objekt::clone_box(&*ctx.client);
