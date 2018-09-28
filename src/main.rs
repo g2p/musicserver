@@ -105,27 +105,29 @@ fn main() {
 
     // Clone the client so that the compiler trusts us not to
     // reuse the same client across multiple closures
-    let client1 = client.clone();
     let client2 = client.clone();
 
-    let main_future = gpsoauth::master_auth_async(
-        &client,
-        username.as_str(),
-        password.as_str(),
-        device_id.as_str(),
-    ).and_then(move |master_token| {
+    let ctx = gpsoauth::AuthContext {
+        client: Box::new(client.clone()),
+        username,
+        password,
+        device_id,
+        service_info: gpsoauth::ServiceInfo {
+            service: "sj".to_owned(),
+            app: "com.google.android.music".to_owned(),
+            client_sig: "38918a453d07199354f8b19af05ec6562ced5788".to_owned(),
+        },
+        master_token: None,
+        oauth_token: None,
+    };
+
+    let main_future = gpsoauth::master_auth_async(ctx).and_then(move |ctx| {
+        let master_token = ctx.master_token.clone().unwrap();
         println!("Master token is {}", master_token);
         write_token(&master_token_path, &master_token);
-        gpsoauth::oauth_async(
-            &client1,
-            username.as_str(),
-            &master_token,
-            device_id.as_str(),
-            "sj",
-            "com.google.android.music",
-            "38918a453d07199354f8b19af05ec6562ced5788",
-        )
-    }).and_then(move |oauth_token| {
+        gpsoauth::oauth_async(ctx)
+    }).and_then(move |ctx| {
+        let oauth_token = ctx.oauth_token.clone().unwrap();
         println!("OAuth token is {}", oauth_token);
         write_token(&oauth_token_path, &oauth_token);
         client2.request(hyper::Request::get("https://mclients.googleapis.com/sj/v2.5/devicemanagementinfo?alt=json&hl=en_US&dv=0&tier=fr").authorization_header(&oauth_token).body(hyper::Body::from("")).unwrap())
