@@ -17,7 +17,7 @@ use hyper::service::service_fn;
 use hyper::Server;
 use hyper_rustls::HttpsConnector;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
 const CONF_FILENAME: &'static str = "config.toml";
@@ -34,10 +34,10 @@ fn open_conf(dirs: &ProjectDirs) -> std::io::Result<std::fs::File> {
         .read(true)
         .write(true)
         .create_new(true)
+        .mode(0o600)
         .open(&conf_path)
     {
         Ok(mut conf) => {
-            conf.metadata().unwrap().permissions().set_mode(0o600);
             let conf_example = include_str!("config-example.toml");
             conf.write(conf_example.as_bytes()).unwrap();
             conf.seek(SeekFrom::Start(0)).unwrap();
@@ -61,9 +61,9 @@ fn write_token(token_path: &PathBuf, token: &str) {
     let mut new_file = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
+        .mode(0o600)
         .open(&new_path)
         .unwrap();
-    new_file.metadata().unwrap().permissions().set_mode(0o600);
     new_file.write_all(token.as_bytes()).unwrap();
     std::fs::rename(&new_path, token_path).unwrap();
 }
