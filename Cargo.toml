@@ -10,6 +10,7 @@ futures = "*"
 gpsoauth = { path = "../gpsoauth-rs" }
 hyper = "*"
 hyper-rustls = "*"
+objekt = "*"
 rustls = "*"
 serde_json = "*"
 toml = "*"

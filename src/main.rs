@@ -4,6 +4,7 @@ extern crate futures;
 extern crate gpsoauth;
 extern crate hyper;
 extern crate hyper_rustls;
+extern crate objekt;
 extern crate rustls;
 extern crate serde_json;
 extern crate toml;
@@ -14,7 +15,7 @@ use futures::prelude::*;
 use gpsoauth::AuthorizedRequestBuilder;
 use hyper::client::HttpConnector;
 use hyper::service::service_fn;
-use hyper::Server;
+use hyper::{Request, Server};
 use hyper_rustls::HttpsConnector;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::OpenOptionsExt;
@@ -104,7 +105,7 @@ fn main() {
     let device_id = conf["device-id"].as_str().unwrap().to_owned();
 
     let ctx = gpsoauth::AuthContext {
-        client: Box::new(client.clone()),
+        client: Box::new(client),
         username,
         password,
         device_id,
@@ -128,18 +129,20 @@ fn main() {
         write_token(&oauth_token_path, &oauth_token);
         ctx.client.request(hyper::Request::get("https://mclients.googleapis.com/sj/v2.5/devicemanagementinfo?alt=json&hl=en_US&dv=0&tier=fr").authorization_header(&oauth_token).body(hyper::Body::from("")).unwrap())
             .map_err(|e| eprintln!("API error: {}", e))
-    }).and_then(|resp| {
+            .map(|resp| (resp, ctx))
+    }).and_then(|(resp, ctx)| {
         resp.into_body().concat2()
             .map_err(|e| eprintln!("API error (body chunks): {}", e))
-    }).and_then(move |body| {
+            .map(|body| (body, ctx))
+    }).and_then(move |(body, ctx)| {
         //println!("Devices: {:#?}", serde_json::from_slice::<serde_json::Value>(&body));
         println!("{}", "Devices: ".to_owned() + std::str::from_utf8(&body).unwrap());
         println!("Listening on {}", addr);
         let proxy_svc = move || {
-            let client = client.clone();
+            let client = objekt::clone_box(&*ctx.client);
             service_fn(move |req| {
                 println!("Proxying {}", req.uri().path());
-                client.get("http://google.fr/".parse().unwrap())
+                client.request(Request::get("http://google.fr/").body(hyper::Body::from("")).unwrap())
             })
         };
 
