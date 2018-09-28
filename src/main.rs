@@ -9,13 +9,12 @@ extern crate toml;
 extern crate webpki_roots;
 
 use directories::ProjectDirs;
-use futures::future::{err, ok};
 use futures::prelude::*;
 use hyper::client::HttpConnector;
 use hyper::service::service_fn;
-use hyper::{Client, Server};
+use hyper::Server;
 use hyper_rustls::HttpsConnector;
-use std::io::{BufRead, Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
@@ -67,75 +66,6 @@ fn write_token(token_path: &PathBuf, token: &str) {
     std::fs::rename(&new_path, token_path).unwrap();
 }
 
-fn master_auth_async(
-    client: &Client<HttpsConnector<HttpConnector>>,
-    username: &str,
-    password: &str,
-    device_id: &str,
-) -> impl Future<Item = String, Error = ()> {
-    client
-        .request(gpsoauth::master_login_request(
-            username, password, device_id,
-        )).and_then(move |res| {
-            res.into_body().fold(None, |acc, chunk| {
-                ok::<_, hyper::Error>(chunk.lines().fold(acc, |acc, line| {
-                    let line = line.unwrap();
-                    if line.starts_with("Token=") {
-                        Some(line[6..].to_owned())
-                    } else {
-                        acc
-                    }
-                }))
-            })
-        }).map_err(|e| eprintln!("Login error {}", e))
-        .then(|r| {
-            if let Ok(Some(x)) = r {
-                ok(x)
-            } else if let Err(y) = r {
-                err(y)
-            } else {
-                err(eprintln!("Login error (no token)"))
-            }
-        })
-}
-
-fn oauth_async(
-    client: &Client<HttpsConnector<HttpConnector>>,
-    username: &str,
-    master_token: &str,
-    device_id: &str,
-) -> impl Future<Item = String, Error = ()> {
-    client
-        .request(gpsoauth::oauth_request(
-            username,
-            master_token,
-            device_id,
-            "sj",
-            "com.google.android.music",
-            "38918a453d07199354f8b19af05ec6562ced5788",
-        )).and_then(move |res| {
-            res.into_body().fold(None, |acc, chunk| {
-                ok::<_, hyper::Error>(chunk.lines().fold(acc, |acc, line| {
-                    let line = line.unwrap();
-                    if line.starts_with("Auth=") {
-                        Some(line[5..].to_owned())
-                    } else {
-                        acc
-                    }
-                }))
-            })
-        }).map_err(|e| eprintln!("Login error {}", e))
-        .then(|r| {
-            if let Ok(Some(x)) = r {
-                ok(x)
-            } else if let Err(y) = r {
-                err(y)
-            } else {
-                err(eprintln!("Login error (no token)"))
-            }
-        })
-}
-
 fn main() {
     env_logger::init();
     let dirs = ProjectDirs::from("com.github", "G2P", "Music Server").unwrap();
@@ -165,7 +95,7 @@ fn main() {
         .root_store
         .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
     let https = HttpsConnector::from((http, tls_config));
-    let client = Client::builder().build::<_, hyper::Body>(https);
+    let client = hyper::Client::builder().build::<_, hyper::Body>(https);
 
     let username = conf["username"].as_str().unwrap().to_owned();
     let password = conf["password"].as_str().unwrap().to_owned();
@@ -175,7 +105,7 @@ fn main() {
     // reuse the same client across multiple closures
     let client1 = client.clone();
 
-    let main_future = master_auth_async(
+    let main_future = gpsoauth::master_auth_async(
         &client,
         username.as_str(),
         password.as_str(),
@@ -183,11 +113,14 @@ fn main() {
     ).and_then(move |master_token| {
         println!("Master token is {}", master_token);
         write_token(&master_token_path, &master_token);
-        oauth_async(
+        gpsoauth::oauth_async(
             &client1,
             username.as_str(),
             &master_token,
             device_id.as_str(),
+            "sj",
+            "com.google.android.music",
+            "38918a453d07199354f8b19af05ec6562ced5788",
         )
     }).and_then(move |oauth_token| {
         println!("OAuth token is {}", oauth_token);
