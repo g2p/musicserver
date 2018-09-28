@@ -5,11 +5,13 @@ extern crate gpsoauth;
 extern crate hyper;
 extern crate hyper_rustls;
 extern crate rustls;
+extern crate serde_json;
 extern crate toml;
 extern crate webpki_roots;
 
 use directories::ProjectDirs;
 use futures::prelude::*;
+use gpsoauth::AuthorizedRequestBuilder;
 use hyper::client::HttpConnector;
 use hyper::service::service_fn;
 use hyper::Server;
@@ -104,6 +106,7 @@ fn main() {
     // Clone the client so that the compiler trusts us not to
     // reuse the same client across multiple closures
     let client1 = client.clone();
+    let client2 = client.clone();
 
     let main_future = gpsoauth::master_auth_async(
         &client,
@@ -125,6 +128,14 @@ fn main() {
     }).and_then(move |oauth_token| {
         println!("OAuth token is {}", oauth_token);
         write_token(&oauth_token_path, &oauth_token);
+        client2.request(hyper::Request::get("https://mclients.googleapis.com/sj/v2.5/devicemanagementinfo?alt=json&hl=en_US&dv=0&tier=fr").authorization_header(&oauth_token).body(hyper::Body::from("")).unwrap())
+            .map_err(|e| eprintln!("API error: {}", e))
+    }).and_then(|resp| {
+        resp.into_body().concat2()
+            .map_err(|e| eprintln!("API error (body chunks): {}", e))
+    }).and_then(move |body| {
+        //println!("Devices: {:#?}", serde_json::from_slice::<serde_json::Value>(&body));
+        println!("{}", "Devices: ".to_owned() + std::str::from_utf8(&body).unwrap());
         println!("Listening on {}", addr);
         let proxy_svc = move || {
             let client = client.clone();

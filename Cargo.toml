@@ -11,6 +11,7 @@ gpsoauth = { path = "../gpsoauth-rs" }
 hyper = "*"
 hyper-rustls = "*"
 rustls = "*"
+serde_json = "*"
 toml = "*"
 webpki-roots = "*"
 
