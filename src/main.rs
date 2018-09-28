@@ -103,10 +103,6 @@ fn main() {
     let password = conf["password"].as_str().unwrap().to_owned();
     let device_id = conf["device-id"].as_str().unwrap().to_owned();
 
-    // Clone the client so that the compiler trusts us not to
-    // reuse the same client across multiple closures
-    let client2 = client.clone();
-
     let ctx = gpsoauth::AuthContext {
         client: Box::new(client.clone()),
         username,
@@ -130,7 +126,7 @@ fn main() {
         let oauth_token = ctx.oauth_token.clone().unwrap();
         println!("OAuth token is {}", oauth_token);
         write_token(&oauth_token_path, &oauth_token);
-        client2.request(hyper::Request::get("https://mclients.googleapis.com/sj/v2.5/devicemanagementinfo?alt=json&hl=en_US&dv=0&tier=fr").authorization_header(&oauth_token).body(hyper::Body::from("")).unwrap())
+        ctx.client.request(hyper::Request::get("https://mclients.googleapis.com/sj/v2.5/devicemanagementinfo?alt=json&hl=en_US&dv=0&tier=fr").authorization_header(&oauth_token).body(hyper::Body::from("")).unwrap())
             .map_err(|e| eprintln!("API error: {}", e))
     }).and_then(|resp| {
         resp.into_body().concat2()
