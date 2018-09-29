@@ -12,7 +12,7 @@ hyper = "*"
 hyper-rustls = "*"
 objekt = "*"
 rustls = "*"
-serde_json = "*"
+serde_json = { version = "*", features = ["preserve_order"] }
 toml = "*"
 webpki-roots = "*"
 
